@@ -1,0 +1,43 @@
+---One time script for purging rows from both tables to retain last 9 months data
+
+USE [BPM]
+Go
+declare @rowcount as int
+set @rowcount = 1
+while(@rowcount>0)
+begin
+DELETE top (500) from dbo.tblErrorProperty where errorid in (select errorid from tblError where DateTimeStamp<(DATEADD(m, -9, getdate())))
+set @rowcount = @@ROWCOUNT
+CHECKPOINT
+end
+
+declare @rowcount as int
+set @rowcount = 1
+while(@rowcount>0)
+begin
+DELETE top (200) from dbo.tblError where DateTimeStamp<(DATEADD(m, -9, getdate()))
+set @rowcount = @@ROWCOUNT
+CHECKPOINT
+end
+
+
+---Script for weekly SQL Agent job to retain only last 9 months data for both tables
+
+USE [BPM]
+Go
+declare @rowcount as int
+set @rowcount = 1
+while(@rowcount>0)
+begin
+DELETE from dbo.tblErrorProperty where errorid in (select errorid from tblError where DateTimeStamp<(DATEADD(m, -9, getdate()))
+set @rowcount = @@ROWCOUNT
+CHECKPOINT
+end
+
+set @rowcount = 1
+while(@rowcount>0)
+begin
+DELETE from dbo.tblError where DateTimeStamp<(DATEADD(m, -9, getdate()))
+set @rowcount = @@ROWCOUNT
+CHECKPOINT
+end
