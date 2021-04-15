@@ -1,0 +1,56 @@
+CREATE TABLE #ListofLogins (ID int,Login varchar(800))
+SET NOCOUNT ON
+INSERT INTO #ListofLogins (id,Login) VALUES (1,'GMO\Service-Metaadata'),(2,'GMO\service-ssrepl'),(3,'GMO\SQLPerf'),(4,'GMO\Admin-NCumming'),
+(5,'GMO\service-psql');
+
+Declare @Tbl table (uname varchar(50), type varchar(10), privlege varchar(10), lname varchar(50), path varchar(60)) ;
+
+--select *  from #ListofLogins
+select 1 where 1 = 2
+Declare @maxlogins int;Select @maxlogins = max(id) From #ListofLogins
+Declare @counter int;Set @counter = 1
+Declare @login_name varchar(50);
+Declare @Output int;
+Declare @Result varchar(800);
+
+While @counter <= @maxlogins
+Begin
+Print ' ';
+Print @@ServerName
+set @login_name = (select Login from #ListofLogins where ID = @counter )
+If Exists (select loginname from master.dbo.syslogins
+    where loginname = @login_name)
+Begin
+       Print 'Individual Login for '+@login_name+' Found'
+End
+ELSE
+Begin
+--set @login_name = (select Login from #ListofLogins where ID = @counter )
+    Print 'Individual Login for '+@login_name+' Notfound'
+END
+
+BEGIN TRY
+Insert into @Tbl execute master..xp_logininfo @login_name
+END TRY
+
+BEGIN CATCH
+Print 'Please provide logins in proper format'
+END CATCH
+
+set @output = (select count(1) from @Tbl)
+If(@output>0)
+begin
+		  Print 'Recursive Login for '+@login_name+' Found'
+		  set @Result = (Select Top (1) path from @Tbl);
+		  Print 'Login Path = '+@Result;
+END
+ELSE
+BEGIN
+	      Print 'Recursive Login for '+@login_name+' Notfound'
+end
+
+Select @counter = @counter + 1
+DELETE FROM @Tbl
+END
+drop table #ListofLogins
+SET NOCOUNT OFF
