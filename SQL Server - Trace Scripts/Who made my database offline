@@ -1,0 +1,76 @@
+
+/*  Who changed SQL Server database state to OFFLINE?  */
+
+
+DECLARE @FileName VARCHAR(MAX)
+
+SELECT @FileName = SUBSTRING(path, 0, LEN(path)-CHARINDEX('\', REVERSE(path))+1) + '\Log.trc'
+FROM sys.traces WHERE is_default = 1;
+
+SELECT gt.EventClass,e.name as EventName,gt.TextData,gt.ObjectID,gt.ObjectName,gt.DatabaseName,gt.SessionLoginName,
+gt.StartTime,gt.ApplicationName,gt.HostName,gt.NTUserName,gt.NTDomainName
+FROM sys.fn_trace_gettable( @FileName, DEFAULT ) AS gt
+JOIN sys.trace_events e 
+    ON gt.EventClass = e.trace_event_id
+WHERE gt.EventClass = 164  -- Object Altered Event
+  AND ObjectType = 16964   -- Database Object
+  
+/*  Who changed SQL Server database state to OFFLINE?  */
+  
+  EXEC sys.sp_readerrorlog @p1 = 0, @p2 = 1, @p3 = N'OFFLINE';
+  
+
+/*  Who changed SQL Server database state to OFFLINE?  */
+ 
+  
+select *  from sys.messages
+where language_id = 1033
+and text like '%setting database option%for database%';
+
+/*  Who changed SQL Server database state to OFFLINE?  */
+
+DECLARE  @DBNAME nvarchar(100)
+  ,@FileName nvarchar(max)
+  ,@spid int
+  ,@LogDate Datetime
+  ,@Status nvarchar(10)
+  
+SET @DBNAME = 'AdventureWorks2008R2' -- Change DB Name
+SET @Status = 'OFFLINE' --[OFFLINE or ONLINE]
+SELECT @FileName=[path] FROM sys.traces WHERE is_default=1
+
+DECLARE @ErrorLogTable table (Logdate datetime, ProcessInfo nvarchar(10), [Text] nvarchar(max))
+
+INSERT INTO @ErrorLogTable
+EXEC xp_readerrorlog 0,1, @Status, @DBNAME, NULL, NULL, 'desc'
+
+SELECT TOP 1 @spid=cast(SUBSTRING(ProcessInfo,5,5) AS int)
+   ,@LogDate=cast(Logdate AS nvarchar) 
+FROM @ErrorLogTable
+
+SELECT DatabaseID, DatabaseName, HostName, ApplicationName, LoginName, StartTime
+FROM sys.fn_trace_gettable( @FileName, DEFAULT )
+WHERE spid=@spid and DatabaseName=@DBNAME and CAST(StartTime AS nvarchar)=@LogDate
+  
+  
+  
+  DECLARE @FileName VARCHAR(MAX)
+
+SELECT @FileName = SUBSTRING(path, 0, LEN(path)-CHARINDEX('\', REVERSE(path))+1) + '\Log.trc'
+FROM sys.traces WHERE is_default = 1;
+
+SELECT gt.EventClass,e.name as EventName,gt.TextData,gt.ObjectID,gt.ObjectName,gt.DatabaseName,gt.SessionLoginName,
+gt.StartTime,gt.ApplicationName,gt.HostName,gt.NTUserName,gt.NTDomainName
+FROM sys.fn_trace_gettable( @FileName, DEFAULT ) AS gt
+JOIN sys.trace_events e 
+    ON gt.EventClass = e.trace_event_id
+WHERE gt.EventClass = 164  -- Object Altered Event
+  AND ObjectType = 16964   -- Database Object
+  Refferencec Links :
+  
+  https://databasebestpractices.com/changed-sql-server-database-state-offline/
+  https://dba.stackexchange.com/questions/89815/when-was-a-database-taken-offline
+  https://www.sanssql.com/2013/11/when-was-my-database-last-taken-offline.html
+  https://stackoverflow.com/questions/1972412/tsql-to-find-when-was-the-database-taken-offline
+  https://jasonbrimhall.info/2018/11/13/audit-database-offline-events/
+  
