@@ -1,0 +1,193 @@
+
+
+______________________________________________________________________________________________________________________________________________
+
+USE [RiskDataMart]
+GO
+DBCC SHRINKFILE (N'RiskDataMart_Data' , 1350000)
+GO
+
+______________________________________________________________________________________________________________________________________________
+
+USE master 
+GO 
+SELECT d.name,percent_complete, session_id,start_time, status, command, estimated_completion_time, cpu_time, total_elapsed_time
+FROM    sys.dm_exec_requests E left join sys.databases D on e.database_id = d.database_id
+WHERE    command in ('DbccFilesCompact','DbccSpaceReclaim')
+
+______________________________________________________________________________________________________________________________________________
+
+USE RiskDataMart 
+GO 
+SELECT DB_NAME() AS DbName, name AS FileName, 
+size/128.0 AS CurrentSizeMB,size/128.0 - CAST(FILEPROPERTY(name, 'SpaceUsed') AS INT)/128.0 AS FreeSpaceMB 
+FROM sys.database_files; 
+
+______________________________________________________________________________________________________________________________________________
+
+select a.session_id,command, b.text, percent_complete, done_in_minutes = a.estimated_completion_time / 1000 / 60
+, min_in_progress = DATEDIFF(MI, a.start_time, DATEADD(ms, a.estimated_completion_time, GETDATE() ))
+, a.start_time, estimated_completion_time = DATEADD(ms, a.estimated_completion_time, GETDATE() )
+from sys.dm_exec_requests a CROSS APPLY sys.dm_exec_sql_text(a.sql_handle) b
+where command like '%dbcc%';
+
+______________________________________________________________________________________________________________________________________________
+
+SELECT percent_complete, start_time, status, command, estimated_completion_time/1000/60 As 'Minutes to Completion', total_elapsed_time/1000/60 As 'Minutes Elapsed', wait_type, last_wait_type
+FROM sys.dm_exec_requests where command like 'DbccFilesCompact'
+order by 'Minutes to Completion' desc
+
+______________________________________________________________________________________________________________________________________________
+
+SELECT LogicalName = dbf.name,FileType = dbf.type_desc,FilegroupName = fg.name,PhysicalFileLocation = dbf.physical_name
+,FileSizeMB = CONVERT(DECIMAL(10,2),dbf.size/128.0),UsedSpaceMB = CONVERT(DECIMAL(10,2),dbf.size/128.0 - ((dbf.size/128.0) - CAST(FILEPROPERTY(dbf.name, 'SPACEUSED') AS INT)/128.0))
+,FreeSpaceMB = CONVERT(DECIMAL(10,2),dbf.size/128.0 - CAST(FILEPROPERTY(dbf.name, 'SPACEUSED') AS INT)/128.0)
+FROM sys.database_files dbf LEFT JOIN sys.filegroups fg ON dbf.data_space_id = fg.data_space_id 
+ORDER BY dbf.type DESC, dbf.name;
+
+______________________________________________________________________________________________________________________________________________
+
+SELECT TextData,HostName,ApplicationName,LoginName, StartTime  
+FROM [fn_trace_gettable]('C:\Program Files\Microsoft SQL Server\MSSQL10_50.MSSQLSERVER\MSSQL\Log\log_75.trc', DEFAULT) 
+WHERE TextData LIKE '%SHRINKFILE%';
+
+______________________________________________________________________________________________________________________________________________
+
+select te.name as event_name,tr.DatabaseName,tr.FileName,tr.IntegerData,tr.IntegerData2,tr.LoginName,
+tr.StartTime,tr.EndTime
+--select * 
+from  sys.fn_trace_gettable(convert(nvarchar(255),(select value from sys.fn_trace_getinfo(0) where property=2)), 0) tr
+inner join sys.trace_events te on tr.EventClass = te.trace_event_id
+where  tr.EventClass in (93, 95) --can't identify any other EventClass to add here
+order by 
+EndTime desc;
+_____________________________________________________________________________________________________________________________________________
+
+USE [FITS]
+GO
+
+select 
+	db_name()			AS [DatabaseName],
+	s.name				AS [DB_File_Name],
+	s.physical_name		AS [FileName],
+	s.size * CONVERT(float,8) AS [TotalSize],
+	CAST(CASE s.type WHEN 2 
+			THEN s.size * CONVERT(float,8) 
+			ELSE dfs.allocated_extent_page_count*convert(float,8) 
+		END AS float)	AS [UsedSpace],
+	CASE s.type WHEN 2 
+		THEN 0 
+		ELSE s.size * CONVERT(float,8) - dfs.allocated_extent_page_count*convert(float,8) 
+	END					AS [AvailableFreeSpace] 
+from sys.database_files AS s 
+left outer join sys.dm_db_file_space_usage as dfs 
+	ON dfs.database_id = db_id() 
+	AND dfs.file_id = s.file_id
+where (s.drop_lsn IS NULL)
+______________________________________________________________________________________________________________________________________________
+
+SELECT 
+    TextData,
+    HostName,
+    ApplicationName,
+    LoginName, 
+    StartTime  
+FROM 
+[fn_trace_gettable]('C:\Program Files\Microsoft SQL Server\MSSQL10_50.MSSQLSERVER\MSSQL\Log\log_75.trc', DEFAULT) 
+WHERE TextData LIKE '%SHRINKFILE%';
+______________________________________________________________________________________________________________________________________________
+
+USE [FITS]
+GO
+SELECT [TYPE] = A.TYPE_DESC,[FILE_Name] = A.name,[FILEGROUP_NAME] = fg.name,[File_Location] = A.PHYSICAL_NAME
+,[FILESIZE_MB] = CONVERT(DECIMAL(10,2),A.SIZE/128.0),[USEDSPACE_MB] = CONVERT(DECIMAL(10,2),A.SIZE/128.0 - ((SIZE/128.0) - CAST(FILEPROPERTY(A.NAME, 'SPACEUSED') AS INT)/128.0))
+,[FREESPACE_MB] = CONVERT(DECIMAL(10,2),A.SIZE/128.0 - CAST(FILEPROPERTY(A.NAME, 'SPACEUSED') AS INT)/128.0)
+,[FREESPACE_%] = CONVERT(DECIMAL(10,2),((A.SIZE/128.0 - CAST(FILEPROPERTY(A.NAME, 'SPACEUSED') AS INT)/128.0)/(A.SIZE/128.0))*100)
+,[AutoGrow] = 'By ' + CASE is_percent_growth WHEN 0 THEN CAST(growth/128 AS VARCHAR(10)) + ' MB -' 
+WHEN 1 THEN CAST(growth AS VARCHAR(10)) + '% -' ELSE '' END 
+ + CASE max_size WHEN 0 THEN 'DISABLED' WHEN -1 THEN ' Unrestricted' 
+ ELSE ' Restricted to ' + CAST(max_size/(128*1024) AS VARCHAR(10)) + ' GB' END 
++ CASE is_percent_growth WHEN 1 THEN ' [autogrowth by percent, BAD setting!]' ELSE '' END
+FROM sys.database_files A LEFT JOIN sys.filegroups fg ON A.data_space_id = fg.data_space_id 
+order by A.TYPE desc, A.NAME;
+
+______________________________________________________________________________________________________________________________________________
+
+https://dba.stackexchange.com/questions/118225/list-all-sessions-from-current-user
+
+https://sqldbpool.com/2011/06/08/how-to-kill-all-sessions-that-have-open-connection-in-a-sql-server-database/
+
+https://www.johnsansom.com/dmv-query-to-identify-all-active-sql-server-sessions/
+
+https://www.codeproject.com/Articles/389725/How-to-find-the-active-SQL-connections-and-kill-th
+
+https://blog.sqlauthority.com/2017/06/10/sql-server-not-able-kill-spid-kill-statusonly/
+https://blog.sqlauthority.com/2017/12/17/kill-processes-idle-x-hours-interview-question-week-152/
+https://blog.sqlauthority.com/2017/09/24/kill-user-sessions-spid-sql-server-interview-question-week-140/
+http://sqlskillport.blogspot.com/2012/03/how-to-connect-to-dedicated.html
+https://blogs.msdn.microsoft.com/sqlsakthi/2011/02/08/different-status-of-a-spid-in-sql-server-and-what-do-they-mean/
+https://stackoverflow.com/questions/22038695/how-to-find-out-why-the-status-of-a-spid-is-suspended-what-resources-the-spid-i
+https://blog.sqlauthority.com/2015/08/31/sql-server-spid-is-killedrollback-state-what-to-do-next/
+https://blog.sqlauthority.com/2015/07/15/sql-server-process-id-x-was-killed-by-hostname-abc-host-process-id-y/
+http://www.sqlserver-dba.com/2011/11/monitoring-a-rollback-and-sysdm_exec_requests.html
+https://subhrosaha.wordpress.com/2011/03/12/sql-server-checking-rollback-progress-of-killed-spid/
+https://www.mssqltips.com/sqlservertip/1473/killing-a-spid-and-checking-rollback-progress-in-sql-server/
+https://www.sqlskills.com/blogs/paul/why-is-log_reuse_wait_desc-saying-log_backup-after-doing-a-log-backup/
+https://www.sqlskills.com/blogs/paul/worrying-cause-log-growth-log_reuse_wait_desc/
+
+
+
+
+
+USE MASTER 
+
+GO 
+
+CREATE TABLE #TMPFIXEDDRIVES ( 
+  DRIVE  CHAR(1), 
+  MBFREE INT) 
+
+INSERT INTO #TMPFIXEDDRIVES 
+EXEC xp_FIXEDDRIVES 
+
+CREATE TABLE #TMPSPACEUSED ( 
+  DBNAME    VARCHAR(50), 
+  FILENME   VARCHAR(50), 
+  SPACEUSED FLOAT) 
+
+INSERT INTO #TMPSPACEUSED 
+EXEC( 'sp_msforeachdb''use ?; Select ''''?'''' DBName, Name FileNme, 
+fileproperty(Name,''''SpaceUsed'''') SpaceUsed from sysfiles''') 
+
+SELECT   C.DRIVE, 
+         CASE  
+           WHEN (C.MBFREE) > 1000 THEN CAST(CAST(((C.MBFREE) / 1024.0) AS DECIMAL(18,2)) AS VARCHAR(20)) + ' GB' 
+           ELSE CAST(CAST((C.MBFREE) AS DECIMAL(18,2)) AS VARCHAR(20)) + ' MB' 
+         END AS DISKSPACEFREE, 
+         A.NAME AS DATABASENAME, 
+         B.NAME AS FILENAME, 
+         CASE B.TYPE  
+           WHEN 0 THEN 'DATA' 
+           ELSE TYPE_DESC 
+         END AS FILETYPE, 
+         CASE  
+           WHEN (B.SIZE * 8 / 1024.0) > 1000 
+           THEN CAST(CAST(((B.SIZE * 8 / 1024) / 1024.0) AS DECIMAL(18,2)) AS VARCHAR(20)) + ' GB' 
+           ELSE CAST(CAST((B.SIZE * 8 / 1024.0) AS DECIMAL(18,2)) AS VARCHAR(20)) + ' MB' 
+         END AS FILESIZE, 
+         CAST((B.SIZE * 8 / 1024.0) - (D.SPACEUSED / 128.0) AS DECIMAL(15,2)) SPACEFREE, 
+         B.PHYSICAL_NAME 
+FROM     SYS.DATABASES A 
+         JOIN SYS.MASTER_FILES B 
+           ON A.DATABASE_ID = B.DATABASE_ID 
+         JOIN #TMPFIXEDDRIVES C 
+           ON LEFT(B.PHYSICAL_NAME,1) = C.DRIVE 
+         JOIN #TMPSPACEUSED D 
+           ON A.NAME = D.DBNAME 
+              AND B.NAME = D.FILENME 
+ORDER BY DISKSPACEFREE, 
+         SPACEFREE DESC 
+          
+DROP TABLE #TMPFIXEDDRIVES 
+
+DROP TABLE #TMPSPACEUSED
